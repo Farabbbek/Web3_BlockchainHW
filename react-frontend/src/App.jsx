@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 
-const CONTRACT_ADDRESS = "0xCFA18575d8126950DCA5960B65eCfEBdCc7041E3";
+const CONTRACT_ADDRESS = "CONTRACT_ADDRESS";
 const CONTRACT_ABI = [
   {
     "inputs": [
