@@ -1,87 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 
-const CONTRACT_ADDRESS = "CONTRACT_ADDRESS";
+const CONTRACT_ADDRESS = "0xD99B731af7B3E68EC3BC4D321B0276CBEC6b8a88";
 const CONTRACT_ABI = [
-  {
-    "inputs": [
-      { "internalType": "string", "name": "_title", "type": "string" },
-      { "internalType": "string[]", "name": "_options", "type": "string[]" }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      { "indexed": true, "internalType": "address", "name": "voter", "type": "address" },
-      { "indexed": true, "internalType": "uint256", "name": "optionIndex", "type": "uint256" }
-    ],
-    "name": "Voted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [{ "indexed": false, "internalType": "bool", "name": "active", "type": "bool" }],
-    "name": "VotingStatusChanged",
-    "type": "event"
-  },
-  {
-    "inputs": [],
-    "name": "getOptions",
-    "outputs": [{ "internalType": "string[]", "name": "", "type": "string[]" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getResults",
-    "outputs": [{ "internalType": "uint256[]", "name": "", "type": "uint256[]" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "hasVoted",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "owner",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "title",
-    "outputs": [{ "internalType": "string", "name": "", "type": "string" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "votingActive",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "uint256", "name": "optionIndex", "type": "uint256" }],
-    "name": "vote",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bool", "name": "active", "type": "bool" }],
-    "name": "setVotingActive",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  }
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function totalSupply() view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
+  "function transfer(address to, uint256 amount) returns (bool)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "event Approval(address indexed owner, address indexed spender, uint256 value)"
 ];
 
 const TARGET_CHAIN_ID = 11155111;
@@ -91,10 +22,16 @@ export default function App() {
   const [network, setNetwork] = useState("Unknown");
   const [status, setStatus] = useState("Idle");
   const [statusType, setStatusType] = useState("info");
-  const [pollTitle, setPollTitle] = useState("On-chain Vote");
-  const [options, setOptions] = useState([]);
-  const [results, setResults] = useState([]);
-  const [selectedOption, setSelectedOption] = useState(null);
+  const [tokenName, setTokenName] = useState("FaraToken");
+  const [tokenSymbol, setTokenSymbol] = useState("FARA");
+  const [decimals, setDecimals] = useState(18);
+  const [balance, setBalance] = useState("0");
+  const [totalSupply, setTotalSupply] = useState("0");
+  const [transferTo, setTransferTo] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [approveSpender, setApproveSpender] = useState("");
+  const [approveAmount, setApproveAmount] = useState("");
+  const [lastTxHash, setLastTxHash] = useState("");
   const [history, setHistory] = useState([]);
 
   const providerRef = useRef(null);
@@ -111,6 +48,16 @@ export default function App() {
   const formatAddress = (address) =>
     address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "Unknown";
 
+  const formatTokenAmount = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "0";
+    if (num === 0) return "0";
+    if (num < 0.000001) return "<0.000001";
+    if (num < 1) return num.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+    if (num < 1000) return num.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(num);
+  };
+
   const handleError = (error) => {
     const message =
       error?.shortMessage ||
@@ -120,9 +67,21 @@ export default function App() {
     setStatusState(message, "error");
   };
 
+  const addTxHistory = (entry) => {
+    setHistory((prev) => {
+      const next = [entry, ...prev.filter((item) => item.hash !== entry.hash)];
+      return next.slice(0, 10);
+    });
+  };
+
   const connectWallet = async () => {
     if (!hasProvider) {
       setStatusState("MetaMask not found. Please install it.", "error");
+      return;
+    }
+
+    if (!ethers.isAddress(CONTRACT_ADDRESS)) {
+      setStatusState("Set a valid contract address in App.jsx.", "error");
       return;
     }
 
@@ -142,288 +101,449 @@ export default function App() {
       signerRef.current = signer;
       contractRef.current = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
-      contractRef.current.removeAllListeners("Voted");
-      contractRef.current.on("Voted", async () => {
-        await loadData();
-      });
-
       setAccount(address);
       setNetwork(`${networkInfo.name} (${networkInfo.chainId})`);
       setStatusState("Connected", "success");
 
-      await loadData();
+      await loadTokenData(address);
+      await loadHistory(address);
     } catch (error) {
       handleError(error);
     }
   };
 
-  const loadData = async () => {
+  const loadTokenData = async (addressOverride) => {
     if (!contractRef.current) return;
     try {
-      setStatusState("Loading data...", "info");
-      const [titleValue, opts, res] = await Promise.all([
-        contractRef.current.title(),
-        contractRef.current.getOptions(),
-        contractRef.current.getResults()
+      setStatusState("Loading token data...", "info");
+      const address = addressOverride || account;
+      if (!ethers.isAddress(address)) {
+        setStatusState("Connect wallet first.", "error");
+        return;
+      }
+      const [name, symbol, decimalsValue, supply, balanceValue] = await Promise.all([
+        contractRef.current.name(),
+        contractRef.current.symbol(),
+        contractRef.current.decimals(),
+        contractRef.current.totalSupply(),
+        contractRef.current.balanceOf(address)
       ]);
-      setPollTitle(titleValue || "On-chain Vote");
-      setOptions(opts);
-      setResults(res.map((value) => Number(value)));
-      await loadHistory(opts);
-      setStatusState("Data loaded", "success");
+
+      const decimalsNumber = Number(decimalsValue);
+      setTokenName(name);
+      setTokenSymbol(symbol);
+      setDecimals(decimalsNumber);
+      setTotalSupply(ethers.formatUnits(supply, decimalsNumber));
+      setBalance(ethers.formatUnits(balanceValue, decimalsNumber));
+      setStatusState("Token data loaded", "success");
     } catch (error) {
       handleError(error);
     }
   };
 
-  const loadHistory = async (opts = options) => {
-    if (!contractRef.current) return;
-    const events = await contractRef.current.queryFilter("Voted");
-    const mapped = events
-      .slice(-8)
-      .reverse()
-      .map((event) => {
-        const voter = event.args?.voter ?? event.args?.[0];
-        const optionIndex = Number(event.args?.optionIndex ?? event.args?.[1] ?? 0);
+  const loadHistory = async (addressOverride) => {
+    if (!contractRef.current || !providerRef.current) return;
+    const address = addressOverride || account;
+    if (!ethers.isAddress(address)) return;
+
+    try {
+      const latestBlock = await providerRef.current.getBlockNumber();
+      const fromBlock = Math.max(0, latestBlock - 5000);
+
+      const transferFilter = contractRef.current.filters.Transfer();
+      const approvalFilter = contractRef.current.filters.Approval(address, null);
+
+      const [transferEvents, approvalEvents] = await Promise.all([
+        contractRef.current.queryFilter(transferFilter, fromBlock, latestBlock),
+        contractRef.current.queryFilter(approvalFilter, fromBlock, latestBlock)
+      ]);
+
+      const mappedTransfers = transferEvents
+        .filter((event) => {
+          const from = event.args?.from ?? event.args?.[0];
+          const to = event.args?.to ?? event.args?.[1];
+          return from?.toLowerCase() === address.toLowerCase() || to?.toLowerCase() === address.toLowerCase();
+        })
+        .map((event) => {
+          const from = event.args?.from ?? event.args?.[0];
+          const to = event.args?.to ?? event.args?.[1];
+          const value = event.args?.value ?? event.args?.[2];
+          const direction = from?.toLowerCase() === address.toLowerCase() ? "Sent" : "Received";
+          return {
+            hash: event.transactionHash,
+            type: `Transfer (${direction})`,
+            amount: ethers.formatUnits(value ?? 0, decimals),
+            counterparty: direction === "Sent" ? to : from,
+            status: "confirmed"
+          };
+        });
+
+      const mappedApprovals = approvalEvents.map((event) => {
+        const spender = event.args?.spender ?? event.args?.[1];
+        const value = event.args?.value ?? event.args?.[2];
         return {
-          voter,
-          optionIndex,
-          optionLabel: opts[optionIndex] ?? `Option ${optionIndex}`,
-          txHash: event.transactionHash
+          hash: event.transactionHash,
+          type: "Approval",
+          amount: ethers.formatUnits(value ?? 0, decimals),
+          counterparty: spender,
+          status: "confirmed"
         };
       });
-    setHistory(mapped);
-  };
 
-  const submitVote = async () => {
-    if (!contractRef.current) {
-      setStatusState("Connect wallet first.", "error");
-      return;
-    }
+      const merged = [...mappedTransfers, ...mappedApprovals]
+        .sort((a, b) => (a.hash < b.hash ? 1 : -1))
+        .slice(0, 10);
 
-    if (selectedOption === null) {
-      setStatusState("Select an option to vote.", "error");
-      return;
-    }
-
-    try {
-      setStatusState("Submitting transaction...", "info");
-      const tx = await contractRef.current.vote(selectedOption);
-      setStatusState(`Transaction sent: ${tx.hash}`, "info");
-      await tx.wait();
-      setStatusState("Vote confirmed!", "success");
-      await loadData();
+      setHistory(merged);
     } catch (error) {
       handleError(error);
     }
   };
 
-  useEffect(() => {
-    if (!window.ethereum) return;
-    const handleAccountsChanged = () => window.location.reload();
-    const handleChainChanged = () => window.location.reload();
+    const submitTransfer = async () => {
+      if (!contractRef.current) {
+        setStatusState("Connect wallet first.", "error");
+        return;
+      }
 
-    window.ethereum.on("accountsChanged", handleAccountsChanged);
-    window.ethereum.on("chainChanged", handleChainChanged);
+      if (!ethers.isAddress(transferTo)) {
+        setStatusState("Recipient address is invalid.", "error");
+        return;
+      }
 
-    return () => {
-      window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      window.ethereum.removeListener("chainChanged", handleChainChanged);
+      if (!transferAmount || Number(transferAmount) <= 0) {
+        setStatusState("Enter a valid transfer amount.", "error");
+        return;
+      }
+
+      try {
+        setStatusState("Submitting transfer...", "info");
+        const amount = ethers.parseUnits(transferAmount, decimals);
+        const tx = await contractRef.current.transfer(transferTo, amount);
+        setLastTxHash(tx.hash);
+        addTxHistory({
+          hash: tx.hash,
+          type: "Transfer (Sent)",
+          amount: transferAmount,
+          counterparty: transferTo,
+          status: "pending"
+        });
+        setStatusState(`Transaction sent: ${tx.hash}`, "info");
+        await tx.wait();
+        addTxHistory({
+          hash: tx.hash,
+          type: "Transfer (Sent)",
+          amount: transferAmount,
+          counterparty: transferTo,
+          status: "confirmed"
+        });
+        setStatusState("Transfer confirmed!", "success");
+        await loadTokenData();
+      } catch (error) {
+        handleError(error);
+      }
     };
-  }, []);
 
-  const shortContract = formatAddress(CONTRACT_ADDRESS);
+    const submitApprove = async () => {
+      if (!contractRef.current) {
+        setStatusState("Connect wallet first.", "error");
+        return;
+      }
 
-  return (
-    <div className="app">
-      <Snowfall />
-      <main className="shell">
-        <nav className="navbar">
-          <div className="brand">VoteWeb3</div>
-          <div className="nav-links">
-            <a href="#vote">Vote</a>
-            <a href="#results">Results</a>
-            <a href="#history">History</a>
-          </div>
-          <button className="btn ghost" onClick={connectWallet}>Connect</button>
-        </nav>
+      if (!ethers.isAddress(approveSpender)) {
+        setStatusState("Spender address is invalid.", "error");
+        return;
+      }
 
-        <header className="hero-grid">
-          <div className="hero-copy">
-            <p className="eyebrow">Web3 Voting DApp</p>
-            <h1 className="hero-title">{pollTitle}</h1>
-            <p className="subtitle">
-              Connect MetaMask, cast your vote once, and watch results update live on Sepolia.
-            </p>
-            <div className="hero-actions">
+      if (!approveAmount || Number(approveAmount) <= 0) {
+        setStatusState("Enter a valid approve amount.", "error");
+        return;
+      }
+
+      try {
+        setStatusState("Submitting approval...", "info");
+        const amount = ethers.parseUnits(approveAmount, decimals);
+        const tx = await contractRef.current.approve(approveSpender, amount);
+        setLastTxHash(tx.hash);
+        addTxHistory({
+          hash: tx.hash,
+          type: "Approval",
+          amount: approveAmount,
+          counterparty: approveSpender,
+          status: "pending"
+        });
+        setStatusState(`Transaction sent: ${tx.hash}`, "info");
+        await tx.wait();
+        addTxHistory({
+          hash: tx.hash,
+          type: "Approval",
+          amount: approveAmount,
+          counterparty: approveSpender,
+          status: "confirmed"
+        });
+        setStatusState("Approval confirmed!", "success");
+      } catch (error) {
+        handleError(error);
+      }
+    };
+
+    useEffect(() => {
+      if (!window.ethereum) return;
+      const handleAccountsChanged = () => window.location.reload();
+      const handleChainChanged = () => window.location.reload();
+
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+      window.ethereum.on("chainChanged", handleChainChanged);
+
+      return () => {
+        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        window.ethereum.removeListener("chainChanged", handleChainChanged);
+      };
+    }, []);
+
+    const shortContract = formatAddress(CONTRACT_ADDRESS);
+
+    return (
+      <div className="app">
+        <Snowfall />
+        <main className="shell">
+          <nav className="navbar">
+            <div className="brand">TokenDApp</div>
+            <div className="nav-links">
+              <a href="#transfer">Transfer</a>
+              <a href="#approve">Approve</a>
+              <a href="#wallet">Wallet</a>
+            </div>
+            <button className="btn ghost" onClick={connectWallet}>Connect</button>
+          </nav>
+
+          <header className="hero-grid" id="wallet">
+            <div className="hero-copy">
+              <p className="eyebrow">ERC-20 Token Dashboard</p>
+              <h1 className="hero-title">{tokenName}</h1>
+              <p className="subtitle">
+                Connect MetaMask on Sepolia to transfer tokens and manage allowances.
+              </p>
+              <div className="hero-actions">
+                <button className="btn primary" onClick={connectWallet}>Connect MetaMask</button>
+                <button className="btn outline" onClick={() => loadTokenData()}>
+                  Refresh data
+                </button>
+              </div>
+              <div className="stats">
+                <div className="stat-card">
+                  <span className="stat-value">{tokenSymbol}</span>
+                  <span className="stat-label">Symbol</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{formatTokenAmount(totalSupply)}</span>
+                  <span className="stat-label">Total supply</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">Sepolia</span>
+                  <span className="stat-label">Testnet</span>
+                </div>
+              </div>
+            </div>
+            <div className="hero-card">
+              <div className="panel-row">
+                <span className="label">Wallet</span>
+                <span className="value">{account}</span>
+              </div>
+              <div className="panel-row">
+                <span className="label">Network</span>
+                <span className="value">{network}</span>
+              </div>
+              <div className="panel-row">
+                <span className="label">Balance</span>
+                <span className="value">{formatTokenAmount(balance)} {tokenSymbol}</span>
+              </div>
+              <div className={`status-pill ${statusType}`}>{status}</div>
               <button className="btn primary" onClick={connectWallet}>Connect MetaMask</button>
             </div>
-            <div className="stats">
-              <div className="stat-card">
-                <span className="stat-value">1</span>
-                <span className="stat-label">Vote per wallet</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-value">Sepolia</span>
-                <span className="stat-label">Testnet</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-value">Live</span>
-                <span className="stat-label">On‑chain results</span>
-              </div>
-            </div>
-          </div>
-          <div className="hero-card">
-            <div className="panel-row">
-              <span className="label">Wallet</span>
-              <span className="value">{account}</span>
-            </div>
-            <div className="panel-row">
-              <span className="label">Network</span>
-              <span className="value">{network}</span>
-            </div>
-            <div className={`status-pill ${statusType}`}>{status}</div>
-            <button className="btn primary" onClick={connectWallet}>Connect MetaMask</button>
-          </div>
-        </header>
+          </header>
 
-        <section className="section" id="vote">
-          <div className="section-head">
-            <h2>{pollTitle}</h2>
-            <p className="muted">Choose one option and submit a single on‑chain transaction.</p>
-          </div>
-
-          <div className="vote-grid">
+          <section className="section" id="transfer">
+            <div className="section-head">
+              <h2>Transfer tokens</h2>
+              <p className="muted">Send tokens directly from your wallet.</p>
+            </div>
             <div className="card">
-              <div className="panel-header">
-                <h3>Options</h3>
-                <span className="pill">Select one</span>
+              <div className="form-grid">
+                <div className="form-row">
+                  <label className="label">Recipient address</label>
+                  <input
+                    className="input"
+                    placeholder="0x..."
+                    value={transferTo}
+                    onChange={(event) => setTransferTo(event.target.value)}
+                  />
+                </div>
+                <div className="form-row">
+                  <label className="label">Amount ({tokenSymbol})</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.0"
+                    value={transferAmount}
+                    onChange={(event) => setTransferAmount(event.target.value)}
+                  />
+                </div>
               </div>
-              <div className="options">
-                {options.map((option, index) => (
-                  <label key={option} className="option">
-                    <input
-                      type="radio"
-                      name="option"
-                      value={index}
-                      checked={selectedOption === index}
-                      onChange={() => setSelectedOption(index)}
-                    />
-                    <span>{option}</span>
-                  </label>
-                ))}
-              </div>
-              <button className="btn primary" onClick={submitVote} disabled={!options.length}>
-                Vote
+              <button className="btn primary" onClick={submitTransfer}>
+                Transfer
               </button>
             </div>
+          </section>
 
-            <div className="card" id="results">
-              <div className="panel-header">
-                <h3>Results</h3>
-                <button className="btn ghost" onClick={loadData}>Refresh</button>
-              </div>
-              <div className="results">
-                {options.map((option, index) => (
-                  <div key={option} className="result-row">
-                    <span>{option}</span>
-                    <span>{results[index] ?? 0}</span>
-                  </div>
-                ))}
-              </div>
+          <section className="section" id="approve">
+            <div className="section-head">
+              <h2>Approve spending</h2>
+              <p className="muted">Allow a spender to use your tokens via allowance.</p>
             </div>
-          </div>
-        </section>
-
-        <section className="card history" id="history">
-          <div className="history-header">
-            <h3>Vote history</h3>
-            <button className="btn ghost" onClick={loadData}>Update</button>
-          </div>
-          <div className="history-list">
-            {history.length === 0 ? (
-              <p className="muted">No votes yet.</p>
-            ) : (
-              history.map((item) => (
-                <div key={item.txHash} className="history-row">
-                  <span className="badge">{item.optionLabel}</span>
-                  <span className="voter">{formatAddress(item.voter)}</span>
-                  <a
-                    className="tx"
-                    href={`https://sepolia.etherscan.io/tx/${item.txHash}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Tx
-                  </a>
+            <div className="card">
+              <div className="form-grid">
+                <div className="form-row">
+                  <label className="label">Spender address</label>
+                  <input
+                    className="input"
+                    placeholder="0x..."
+                    value={approveSpender}
+                    onChange={(event) => setApproveSpender(event.target.value)}
+                  />
                 </div>
-              ))
-            )}
-          </div>
-        </section>
+                <div className="form-row">
+                  <label className="label">Allowance ({tokenSymbol})</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0.0"
+                    value={approveAmount}
+                    onChange={(event) => setApproveAmount(event.target.value)}
+                  />
+                </div>
+              </div>
+              <button className="btn outline" onClick={submitApprove}>
+                Approve
+              </button>
+            </div>
+          </section>
 
-        <footer className="footer">
-          <span>Contract: {shortContract}</span>
-          <span>Network: Sepolia</span>
-        </footer>
-      </main>
-    </div>
-  );
-}
+          {lastTxHash && (
+            <section className="card">
+              <div className="panel-row">
+                <span className="label">Latest transaction</span>
+                <a
+                  className="hash-link"
+                  href={`https://sepolia.etherscan.io/tx/${lastTxHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {lastTxHash}
+                </a>
+              </div>
+            </section>
+          )}
 
-function Snowfall() {
-  const canvasRef = useRef(null);
+          <section className="card">
+            <div className="history-header">
+              <h3>Transaction history</h3>
+              <button className="btn ghost" onClick={() => loadHistory()}>
+                Refresh
+              </button>
+            </div>
+            <div className="history-list">
+              {history.length === 0 ? (
+                <p className="muted">No transactions yet.</p>
+              ) : (
+                history.map((item) => (
+                  <div key={item.hash} className="history-row">
+                    <span className="badge">{item.type}</span>
+                    <span className="voter">
+                      {formatTokenAmount(item.amount)} {tokenSymbol}
+                    </span>
+                    <span className="voter">{formatAddress(item.counterparty)}</span>
+                    <a
+                      className="tx"
+                      href={`https://sepolia.etherscan.io/tx/${item.hash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {item.status}
+                    </a>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext("2d");
-    let animationId;
+          <footer className="footer">
+            <span>Contract: {shortContract}</span>
+            <span>Network: Sepolia</span>
+          </footer>
+        </main>
+      </div>
+    );
+  }
 
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
+  function Snowfall() {
+    const canvasRef = useRef(null);
 
-    resize();
-    window.addEventListener("resize", resize);
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return undefined;
+      const ctx = canvas.getContext("2d");
+      let animationId;
 
-    const flakes = Array.from({ length: 140 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 2 + 0.6,
-      d: Math.random() * 0.9 + 0.4,
-      sway: Math.random() * 0.8 + 0.2
-    }));
+      const resize = () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      };
 
-    const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      resize();
+      window.addEventListener("resize", resize);
 
-      flakes.forEach((flake) => {
+      const flakes = Array.from({ length: 140 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        r: Math.random() * 2 + 0.6,
+        d: Math.random() * 0.9 + 0.4,
+        sway: Math.random() * 0.8 + 0.2
+      }));
+
+      const render = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "rgba(148, 163, 184, 0.6)";
         ctx.beginPath();
-        ctx.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
+        flakes.forEach((flake) => {
+          ctx.moveTo(flake.x, flake.y);
+          ctx.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
+        });
         ctx.fill();
 
-        flake.y += flake.d;
-        flake.x += Math.sin(flake.y * 0.01) * flake.sway;
+        flakes.forEach((flake) => {
+          flake.y += flake.d;
+          flake.x += Math.sin(flake.y * 0.01) * flake.sway;
+          if (flake.y > canvas.height) {
+            flake.y = -flake.r;
+            flake.x = Math.random() * canvas.width;
+          }
+        });
 
-        if (flake.y > canvas.height + 6) {
-          flake.y = -10;
-          flake.x = Math.random() * canvas.width;
-        }
-      });
+        animationId = requestAnimationFrame(render);
+      };
 
-      animationId = requestAnimationFrame(render);
-    };
+      render();
 
-    render();
+      return () => {
+        window.removeEventListener("resize", resize);
+        cancelAnimationFrame(animationId);
+      };
+    }, []);
 
-    return () => {
-      cancelAnimationFrame(animationId);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="snowfall" />;
-}
+    return <canvas ref={canvasRef} className="snowfall" />;
+  }

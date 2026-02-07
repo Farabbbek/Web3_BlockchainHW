@@ -1,6 +1,6 @@
-# Web3 Voting DApp
+# ERC-20 Token DApp (Assignment 4)
 
-A simple Sepolia voting DApp. Frontend uses React + ethers, smart contract is Solidity.
+A Sepolia ERC-20 token DApp with mint/burn, access control, and a React + ethers frontend for transfers and approvals.
 
 ## What’s inside
 - Smart contract: [contracts/Voting.sol](contracts/Voting.sol)
@@ -19,8 +19,10 @@ A simple Sepolia voting DApp. Frontend uses React + ethers, smart contract is So
    - Environment: `Injected Provider - MetaMask`
    - Network: Sepolia
 5. Provide constructor args:
-   - `_title`: question string (e.g. `"Should we launch ?"`)
-   - `_options`: array of options (e.g. `["Yes","No","Abstain"]`)
+   - `name_`: token name (e.g. `"FaraToken"`)
+   - `symbol_`: token symbol (e.g. `"FARA"`)
+   - `initialSupply`: smallest units (for 1,000 EDU with 18 decimals use `1000 * 10**18`)
+   - `cap_`: max supply in smallest units (must be >= `initialSupply`)
 6. Click Deploy and copy the contract address.
 
 ## Frontend setup
@@ -29,21 +31,19 @@ A simple Sepolia voting DApp. Frontend uses React + ethers, smart contract is So
 
 ## Run the frontend
 1. Go to the frontend folder:
-   - `cd react-frontend`
-2. Install dependencies:
-   - `npm install`
-3. Start dev server:
-   - `npm run dev`
+2. Install dependencies.
+3. Start dev server.
 4. Open the URL from the console (usually `http://localhost:5173`).
 
 ## How to use
 1. Open the site and click **Connect MetaMask**.
 2. Switch MetaMask to Sepolia.
-3. Pick an option and click **Vote**.
-4. Results and history update automatically.
+3. Check wallet balance.
+4. Use **Transfer tokens** to send tokens.
+5. Use **Approve spending** to set an allowance for a spender.
 
 ## Notes
 - After every new deploy, update `CONTRACT_ADDRESS`.
-- One wallet can vote only once.
-
-If you want Hardhat or Foundry deployment steps, tell me and I’ll add them.
+- Only the owner can mint.
+- Transfers can be paused/unpaused by the owner.
+- Total supply is capped.
